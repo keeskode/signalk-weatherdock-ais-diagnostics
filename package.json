@@ -1,0 +1,13 @@
+{
+  "name": "signalk-ais-diagnostics",
+  "version": "0.1.0",
+  "description": "AIS UDP diagnostics and control plugin",
+  "main": "index.js",
+  "keywords": [
+    "signalk",
+    "ais",
+    "udp",
+    "pwcd"
+  ],
+  "dependencies": {}
+}
