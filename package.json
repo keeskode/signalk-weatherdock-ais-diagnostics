@@ -5,7 +5,7 @@
   "main": "index.js",
   "keywords": [
     "signalk-node-server-plugin",
-    "ais"
+    "signalk-category-ais"
   ],
   "dependencies": {}
 }
