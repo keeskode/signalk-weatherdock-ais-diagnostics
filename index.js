@@ -10,7 +10,7 @@ module.exports = function (app) {
     const plugin = {};
 
     plugin.id = "signalk-weatherdock-ais-diagnostics";
-    plugin.name = "WeatherDock AIS Diagnostics";
+    plugin.name = "Weatherdock AIS Diagnostics";
 
     let socket;
     let pollTimer;
@@ -90,6 +90,14 @@ module.exports = function (app) {
 
 
     function send(command) {
+
+        if (!socket) {
+            // The socket was closed (plugin stopped) after this send was
+            // scheduled - e.g. one of poll()'s staggered setTimeouts, or a
+            // startPut() follow-up GET, firing after stop() already ran.
+            app.debug("AIS TX skipped, socket not running: " + command);
+            return;
+        }
 
         let msg = Buffer.from(command + "\r\n");
 
@@ -590,6 +598,13 @@ module.exports = function (app) {
 
         plugin.options = options;
 
+        // Defensive: if start() is ever called again without stop() having
+        // run first (mirrors the double-stop() issue above), clean up
+        // whatever's already running instead of leaking it.
+        if (socket || pollTimer || watchdogTimer) {
+            plugin.stop();
+        }
+
         socket = dgram.createSocket("udp4");
 
         socket.on("message", msg => {
@@ -675,14 +690,31 @@ module.exports = function (app) {
 
         if (pollTimer) {
             clearInterval(pollTimer);
+            pollTimer = null;
         }
 
         if (watchdogTimer) {
             clearInterval(watchdogTimer);
+            watchdogTimer = null;
         }
 
         if (socket) {
-            socket.close();
+
+            // Signal K can call stop() more than once in a row (seen in
+            // practice around config saves). Once closed, calling
+            // socket.close() again throws ERR_SOCKET_DGRAM_NOT_RUNNING and
+            // crashes the request handling it - nulling the reference after
+            // close prevents a second call from reaching it at all, and the
+            // try/catch is a second layer of defense in case of any other
+            // already-closed edge case.
+            try {
+                socket.close();
+            } catch (err) {
+                app.debug("AIS socket close ignored: " + err.message);
+            }
+
+            socket = null;
+
         }
 
     };
