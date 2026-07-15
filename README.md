@@ -31,7 +31,7 @@ hardcoded in the code itself:
 | **AIS IP address** | IP address of the EasyTRX3 on your network | `192.168.2.1` |
 | **AIS TX UDP port** | Port the plugin sends `$PWDC` commands to | `10111` |
 | **AIS RX UDP port** | Port the plugin listens on for responses/broadcasts | `10110` |
-| **Polling interval (seconds)** | How often the full diagnostics poll cycle runs | `10` |
+| **Polling interval (seconds)** | How often the full diagnostics poll cycle runs | `21600` (6 hours) |
 
 Change any of these in the config UI and restart the plugin — every part
 of the code reads from this single config object, so there's nowhere else
@@ -45,7 +45,7 @@ that needs updating.
 
 | Path | Type | Notes |
 |---|---|---|
-| `ais.diagnostics.connected` | boolean | `true` if a response was heard from the device in the last 5s |
+| `ais.diagnostics.connected` | boolean | `true` if a response was heard during the last poll cycle (re-evaluated every `interval` seconds, not continuously) |
 | `ais.diagnostics.lastSeen` | ISO 8601 string | Timestamp of the last response received |
 | `ais.diagnostics.lastResponse` | string | The raw last `$PWDC` sentence received |
 | `ais.diagnostics.lastCommand` | string | The raw last command sent to the device |
@@ -203,8 +203,11 @@ Every PUT:
 - A full poll cycle asks for: `LED`, `SM`, `ANCHOR`, `CPA`, `MMSI`, `VER`,
   `PRODDATE`, `NMEA1`, `NMEA2`, `AIS_CONF`, `ALM`, `SD`, `LOG`, `SAIS` — one
   command every 300ms, repeating every `interval` seconds.
-- A watchdog runs every second: if no response has been seen in the last
-  5 seconds, `ais.diagnostics.connected` flips to `false`,
+- A watchdog re-checks once per poll cycle (i.e. every `interval` seconds,
+  same cadence as `poll()`): if no response has been seen since roughly the
+  start of the last cycle - `interval` + ~4.2s (time for the 14 staggered
+  commands to go out) + a 5s safety margin - `ais.diagnostics.connected`
+  flips to `false`,
   `app.setPluginError("AIS offline")` fires, and any in-flight PUT is
   immediately failed rather than left to time out.
 
@@ -275,5 +278,25 @@ line.
   confirmation now numerically compares all fields sent in the original
   `SET` command against the response (handling zero-padding), so it
   actually confirms the setting that was changed.
+- Renamed `plugin.id`/`plugin.name` to `signalk-weatherdock-ais-diagnostics`
+  / "Weatherdock AIS Diagnostics" to match the actual package name.
+- Fixed a crash (`ERR_SOCKET_DGRAM_NOT_RUNNING`) that occurred if Signal K
+  called `plugin.stop()` twice in a row (observed around config saves):
+  `stop()` now nulls out the socket/timers after cleanup and tolerates
+  being called again. `plugin.start()` is similarly defensive if it's ever
+  called twice without an intervening `stop()`.
+- Fixed a related crash where one of `poll()`'s 14 staggered command
+  timeouts (spread up to ~4.2s apart) could still fire after the plugin
+  had already stopped and closed the socket. `send()` — the single choke
+  point all outbound commands go through — now no-ops if the socket isn't
+  running instead of throwing.
+- Changed the default polling interval from 10 seconds to 21600 seconds
+  (6 hours), and reworked the watchdog to match: instead of checking every
+  1 second whether a response was seen in the last 5 seconds, it now
+  re-checks once per poll cycle (every `interval` seconds) whether a
+  response was seen since roughly the start of the last cycle. This keeps
+  `ais.diagnostics.connected` meaningful at long poll intervals — it stays
+  `true` across the whole gap between polls and only changes based on the
+  most recent cycle's result, rather than expiring after a few seconds.
 - Kept all 4 config fields (`aisIp`, `txPort`, `rxPort`, `interval`) and
   the 3 control PUT handlers backward-compatible in shape.
