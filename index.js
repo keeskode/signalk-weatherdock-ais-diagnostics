@@ -50,7 +50,7 @@ module.exports = function (app) {
                 interval: {
                     type: "number",
                     title: "Polling interval seconds",
-                    default: 10
+                    default: 21600
                 }
 
             }
@@ -544,11 +544,27 @@ module.exports = function (app) {
     }
 
 
+    // Alive means "heard from the device at some point during the last
+    // poll cycle" rather than "in the last few seconds" - with a poll
+    // interval that can be hours long, connected should stay true across
+    // the whole gap between polls and only flip on the next cycle's result.
+    // The window covers one full interval, plus the ~4.2s it takes poll()
+    // to stagger all 14 commands out, plus a safety margin for the
+    // device's own response time.
+    function pollWindowMs() {
+
+        const interval = (plugin.options && plugin.options.interval) || 21600;
+
+        return (interval * 1000) + 4200 + 5000;
+
+    }
+
+
     function watchdog() {
 
         const alive =
             lastResponseAt > 0 &&
-            (Date.now() - lastResponseAt) < 5000;
+            (Date.now() - lastResponseAt) < pollWindowMs();
 
         publish("ais.diagnostics.connected", alive);
 
@@ -615,10 +631,10 @@ module.exports = function (app) {
 
         pollTimer = setInterval(
             poll,
-            (options.interval || 10) * 1000
+            (options.interval || 21600) * 1000
         );
 
-        watchdogTimer = setInterval(watchdog, 1000);
+        watchdogTimer = setInterval(watchdog, (options.interval || 21600) * 1000);
 
         poll();
 
