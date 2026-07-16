@@ -58,7 +58,7 @@ connection state is visible on the Signal K plugin config page itself.
 
 | Path | Type | Notes |
 |---|---|---|
-| `ais.radio.silentMode` | boolean | Confirmed. `true` = transmitter silenced |
+| `ais.radio.silentMode` | boolean | Confirmed. `true` = transmitter silenced. Updated by `GET,SM` polling **and** instantly by bit `0x10` of the `LED` broadcast (see below) — the latter is what actually catches changes made outside this plugin between polls |
 
 ### Alarms — Anchor / CPA (confirmed)
 
@@ -140,7 +140,7 @@ values so nothing is lost if a guess is wrong.
 
 | Path | Notes |
 |---|---|
-| `ais.diagnostics.led` | Raw value only. Only 2 distinct samples ever observed (`02`, `12`) — not enough to guess a bit layout |
+| `ais.diagnostics.led` | Raw hex value published as-is. **Bit `0x10` is confirmed** (via a real toggle test: `02`=Silent Mode off, `12`=on, consistent with every other LED value seen across all captures) and separately decoded into `ais.radio.silentMode` - see above. The rest of the byte's bits are still unconfirmed |
 | `ais.diagnostics.adc` | Raw comma-joined value only. Mixes hex and decimal fields with several always-empty slots — no discernible pattern across any capture |
 | `ais.diagnostics.alm.active` (number), `.raw` | Guess: active alarm count/flag |
 | `ais.diagnostics.sd.present` (boolean), `.raw` | Confident — `"NOCARD"` is self-explanatory, anything else means a card is present |
@@ -218,15 +218,17 @@ Every PUT:
 Everything in this plugin falls into one of three buckets:
 
 1. **Confirmed** — verified directly against packet captures and/or the
-   manufacturer app's own `SET` commands (e.g. `SM`, `ANCHOR`, `CPA`,
-   `MMSI`, `PRODDATE`, `$AIALR` alarms). Trust these.
+   manufacturer app's own `SET` commands, or a real toggle test (e.g. `SM`,
+   `ANCHOR`, `CPA`, `MMSI`, `PRODDATE`, `$AIALR` alarms, and bit `0x10` of
+   `LED` for Silent Mode). Trust these.
 2. **Best guess** — the response shape (field count, value ranges) is
    known from captures, but the *meaning* of each field is inferred from
    what's typical on similar marine multiplexer/AIS hardware, since
    Weatherdock hasn't published protocol docs. These are marked `// GUESS`
    in the code and always have a `.raw` sibling path.
-3. **No guess made** — `LED` and `ADC`. Too few samples or no discernible
-   structure to responsibly guess at, so these stay raw-only.
+3. **No guess made** — `ADC`, and the rest of `LED`'s bits beyond `0x10`.
+   Too few samples or no discernible structure to responsibly guess at, so
+   these stay raw-only.
 
 ### How to help correct a guess
 
@@ -298,5 +300,11 @@ line.
   `ais.diagnostics.connected` meaningful at long poll intervals — it stays
   `true` across the whole gap between polls and only changes based on the
   most recent cycle's result, rather than expiring after a few seconds.
+- Discovered and decoded bit `0x10` of the `LED` status broadcast as
+  Silent Mode state (confirmed via a real toggle test). Since the device
+  broadcasts `LED` unprompted every ~5-10s regardless of polling, this
+  means `ais.radio.silentMode` now reflects changes made outside this
+  plugin (manufacturer app, physical device controls) within seconds,
+  without needing a dedicated fast poll for it.
 - Kept all 4 config fields (`aisIp`, `txPort`, `rxPort`, `interval`) and
   the 3 control PUT handlers backward-compatible in shape.
