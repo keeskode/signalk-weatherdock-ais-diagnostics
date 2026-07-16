@@ -1,6 +1,6 @@
 {
   "name": "signalk-weatherdock-ais-diagnostics",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Weatherdock AIS UDP diagnostics and control plugin",
   "main": "index.js",
   "keywords": [
