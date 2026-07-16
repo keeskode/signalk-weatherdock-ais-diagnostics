@@ -259,7 +259,8 @@ module.exports = function (app) {
     // ---- Decoders for each $PWDC,RES,<type> ----
     //
     // Confirmed field meanings (verified against packet captures and the
-    // manufacturer app's own SET commands): SM, ANCHOR, CPA, MMSI, PRODDATE.
+    // manufacturer app's own SET commands, or direct toggle testing):
+    // SM, ANCHOR, CPA, MMSI, PRODDATE, and bit 0x10 of LED (Silent Mode).
     //
     // Everything else below is published as a raw comma-joined string under
     // ais.configuration.* / ais.diagnostics.* because the individual field
@@ -301,10 +302,22 @@ module.exports = function (app) {
         // captures, but the old plugin polled for it, so keep it wired up.
         VER: (p) => publish("ais.configuration.version", p[0]),
 
-        // No confident guess possible here (see note above the decoders
-        // block) - only 2 distinct LED samples and ADC mixes hex/decimal/
-        // empty fields with no discernible pattern. Raw only.
-        LED: (p) => publish("ais.diagnostics.led", p[0]),
+        // CONFIRMED (by real toggle test, not a guess): bit 0x10 of the LED
+        // status byte tracks Silent Mode - 0x02 (off) vs 0x12 (on) was
+        // observed directly. This is consistent with every other LED value
+        // seen across all captures (0x06/0x22 off, 0x16 on). The other bits
+        // are still undeciphered, so the raw hex stays published alongside it.
+        // Since the device broadcasts LED unprompted every ~5-10s regardless
+        // of polling, this reflects an externally-toggled Silent Mode change
+        // almost immediately, without needing to poll for it separately.
+        LED: (p) => {
+            publish("ais.diagnostics.led", p[0]);
+            let value = parseInt(p[0], 16);
+            if (!isNaN(value)) {
+                publish("ais.radio.silentMode", (value & 0x10) !== 0);
+            }
+        },
+
         ADC: (p) => publish("ais.diagnostics.adc", p.join(",")),
 
         // GUESS: single value, likely "any alarm currently active" count/flag.
@@ -516,6 +529,11 @@ module.exports = function (app) {
     }
 
 
+    // SM/ANCHOR/CPA are the only things that can change from outside this
+    // plugin (physical device button, the manufacturer's app, or Signal K
+    // PUTs where the follow-up confirmation GET fires independently anyway).
+    // Everything else essentially never changes and doesn't need frequent
+    // polling, so it's split out onto the long `interval` cycle instead.
     function poll() {
 
         let commands = [
